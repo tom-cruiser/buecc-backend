@@ -1,5 +1,3 @@
-# Create or update .gitignore in the backend directory
-cat > .gitignore << 'EOF'
 # Environment variables
 .env
 .env.local
@@ -41,4 +39,3 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
-EOF

@@ -4,6 +4,8 @@ import dotenv from "dotenv";
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js"; // Renamed from 'router' for clarity
 import propertyRoutes from "./routes/propertyRoutes.js";
+import apiRouter from "./routes/index.js";
+import path from "path";
 
 // Load environment variables from .env file
 dotenv.config();
@@ -17,13 +19,14 @@ const app = express();
 app.use(cors()); // Enable CORS for all routes
 app.use(express.json()); // For parsing JSON request bodies
 
-// --- Define your API routes ---
-// Mount authentication routes under /api/auth
-app.use("/api/auth", authRoutes);
+// Serve uploaded files at /uploads from public/uploads
+app.use("/uploads", express.static(path.join(process.cwd(), "public", "uploads")));
 
-// Mount property routes under /api/properties
-// This is the crucial addition!
-app.use("/api/properties", propertyRoutes);
+// Mount all API routes under /api
+app.use("/api", apiRouter);
+
+// --- Define your API routes ---
+// Note: specific routes are mounted via routes/index.js (apiRouter)
 
 // Basic route for testing server status
 app.get("/", (req, res) => {

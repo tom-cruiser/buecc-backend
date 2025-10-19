@@ -1,5 +1,6 @@
 import TeamMember from "../models/TeamMember.js";
-import { deleteUploadedFile } from "../middleware/upload.js";
+import { deleteUploadedFile, getFileUrl } from "../middleware/upload.js";
+import path from "path";
 import fs from "fs";
 
 // Helper function to handle errors and send a consistent response
@@ -20,14 +21,13 @@ const sendErrorResponse = (res, message, status = 500, error) => {
 // Create a new team member
 export const createTeamMember = async (req, res) => {
   try {
-    const memberData = req.body;
+    const memberData = { ...(req.body || {}) };
 
-    // The 'image' field is the path from the server's uploads folder
-    // The `upload` middleware should handle saving the file and providing the path.
-    // If you're using a single file upload, the path will be on `req.file`.
-    // Example: const imagePath = req.file?.path;
-    // For this example, we assume the `image` path is already in the request body.
-    // If you need to handle file uploads, adapt the logic from the property controller.
+    // Handle uploaded file (if provided via uploadSingle middleware)
+    if (req.file) {
+      // store the accessible URL path (e.g. /uploads/filename)
+      memberData.image = getFileUrl(req.file.filename);
+    }
 
     const newMember = await TeamMember.create(memberData);
 
@@ -56,16 +56,16 @@ export const updateTeamMember = async (req, res) => {
       return sendErrorResponse(res, "Team member not found", 404);
     }
 
-    // Handle image replacement: if a new image is uploaded, delete the old one
-    // This logic assumes `updateData.image` contains the path to the new image.
-    if (updateData.image && updateData.image !== existingMember.image) {
-      if (existingMember.image) {
-        // Construct the full path to the old image and delete it
+    // Handle image replacement: if a new file is uploaded, delete the old one
+    if (req.file) {
+      // new image path to store
+      updateData.image = getFileUrl(req.file.filename);
+
+      // delete previous image file if it exists and is stored under /uploads
+      if (existingMember.image && existingMember.image.startsWith("/uploads/")) {
+        const prevFilename = path.basename(existingMember.image);
         try {
-          const imagePath = `path/to/your/uploads/${existingMember.image}`; // Adjust this path
-          if (fs.existsSync(imagePath)) {
-            deleteUploadedFile(imagePath);
-          }
+          deleteUploadedFile(prevFilename);
         } catch (err) {
           console.warn(`Could not delete old image file: ${err.message}`);
         }
