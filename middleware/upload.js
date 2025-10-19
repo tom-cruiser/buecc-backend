@@ -2,6 +2,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { v4 as uuidv4 } from "uuid";
+import ImageKit from "imagekit";
 
 // Configuration
 const UPLOAD_DIR = path.join(process.cwd(), "public/uploads");
@@ -24,17 +25,28 @@ const ensureUploadDir = () => {
 };
 
 // Configure storage for local file system
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    ensureUploadDir();
-    cb(null, UPLOAD_DIR);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const filename = `property_${Date.now()}_${uuidv4()}${ext}`;
-    cb(null, filename);
-  },
-});
+// If ImageKit is configured (server-side private key), we'll use memory storage
+// to forward files to ImageKit. Otherwise default to disk storage.
+const imagekitEnabled = !!(
+  process.env.IMAGEKIT_PRIVATE_KEY && process.env.IMAGEKIT_URL_ENDPOINT
+);
+
+let storage;
+if (imagekitEnabled) {
+  storage = multer.memoryStorage();
+} else {
+  storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      ensureUploadDir();
+      cb(null, UPLOAD_DIR);
+    },
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      const filename = `property_${Date.now()}_${uuidv4()}${ext}`;
+      cb(null, filename);
+    },
+  });
+}
 
 // File validation
 const fileFilter = (req, file, cb) => {
@@ -111,8 +123,77 @@ export const uploadSingle = upload.single("image"); // For single upload
 export const uploadMultiple = upload.array("images"); // For multiple uploads
 export const uploadMultipleImages = upload.array("images"); // Alias for consistency
 
+// If ImageKit is enabled, post-process uploaded files and send to ImageKit
+let imagekitClient = null;
+// Define placeholder middleware variables (will be assigned below)
+let processSingleToImageKit = (req, res, next) => next();
+let processMultipleToImageKit = (req, res, next) => next();
+
+if (imagekitEnabled) {
+  imagekitClient = new ImageKit({
+    publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
+    privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
+    urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT,
+  });
+
+  // Middleware to upload a single file buffer to ImageKit
+  processSingleToImageKit = async (req, res, next) => {
+    try {
+      if (!req.file || !req.file.buffer) return next();
+
+      const fileBase64 = req.file.buffer.toString("base64");
+      const uploadResult = await imagekitClient.upload({
+        file: `data:${req.file.mimetype};base64,${fileBase64}`,
+        fileName: req.file.originalname,
+      });
+
+      // Attach ImageKit response to req.file
+      req.file.url = uploadResult.url;
+      req.file.fileId = uploadResult.fileId;
+      req.file.publicId = uploadResult.fileId;
+
+      return next();
+    } catch (err) {
+      return next(err);
+    }
+  };
+
+  // Middleware to upload multiple files to ImageKit
+  processMultipleToImageKit = async (req, res, next) => {
+    try {
+      if (!req.files || req.files.length === 0) return next();
+
+      const uploadPromises = req.files.map((file) => {
+        const fileBase64 = file.buffer.toString("base64");
+        return imagekitClient.upload({
+          file: `data:${file.mimetype};base64,${fileBase64}`,
+          fileName: file.originalname,
+        });
+      });
+
+      const results = await Promise.all(uploadPromises);
+
+      // Attach url and fileId to each req.files[i]
+      req.files = req.files.map((file, idx) => {
+        const r = results[idx];
+        return {
+          ...file,
+          url: r.url,
+          fileId: r.fileId,
+          publicId: r.fileId,
+        };
+      });
+
+      return next();
+    } catch (err) {
+      return next(err);
+    }
+  };
+}
+
 // File management utilities
 export const deleteUploadedFile = (filename) => {
+  // If ImageKit is enabled, filename is expected to be a fileId (handled elsewhere)
   const filePath = path.join(UPLOAD_DIR, filename);
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
@@ -125,5 +206,6 @@ export const deleteUploadedFile = (filename) => {
 export const getFileUrl = (filename) => {
   return `/uploads/${filename}`;
 };
+export { processSingleToImageKit, processMultipleToImageKit };
 
 export default upload;
