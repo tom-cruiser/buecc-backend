@@ -26,12 +26,29 @@ const app = express();
 // ========================
 
 // 1. Configure CORS properly
+const allowedOrigins = [
+  process.env.FRONTEND_URL?.replace(/\/$/, ''),
+  'https://buecc-frontend.onrender.com',
+  'http://localhost:5173',
+  'http://localhost:3000'
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "https://buecc-frontend.onrender.com/",
+    origin: function(origin, callback) {
+      // Allow requests with no origin (like mobile apps, curl requests)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['Content-Range', 'X-Content-Range'],
   })
 );
 
@@ -47,18 +64,26 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 // 3. Configure static file serving with proper headers
 app.use(
   "/uploads",
+  (req, res, next) => {
+    // Set CORS headers for all static file requests
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    next();
+  },
   express.static(UPLOAD_DIR, {
     setHeaders: (res, filePath) => {
       // Set proper caching headers for images
       if (filePath.match(/\.(jpg|jpeg|png|gif|webp)$/)) {
-        res.setHeader("Cache-Control", "public, max-age=31536000");
+        res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+        res.setHeader('Vary', 'Origin');
       }
-      // Allow CORS for static files
-      res.setHeader(
-        "Access-Control-Allow-Origin",
-        process.env.FRONTEND_URL || "*"
-      );
     },
+    maxAge: '1y',
+    immutable: true,
   })
 );
 
@@ -98,10 +123,21 @@ app.use((req, res, next) => {
 // Error Handler
 app.use((err, req, res, next) => {
   console.error("🚨 Error:", err.stack);
+  
+  // Handle CORS errors
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({
+      success: false,
+      message: 'CORS Error: Origin not allowed',
+      allowedOrigins: process.env.NODE_ENV === 'development' ? allowedOrigins : undefined
+    });
+  }
+  
+  // Handle other errors
   res.status(500).json({
     success: false,
     message: "Internal Server Error",
-    ...(process.env.NODE_ENV === "development" && { error: err.message }),
+    ...(process.env.NODE_ENV === 'development' && { error: err.message }),
   });
 });
 
