@@ -352,8 +352,13 @@ export const deleteProperty = async (req, res) => {
     if (property.images?.length > 0) {
       property.images.forEach((image) => {
         try {
-          if (image.path) {
-            deleteUploadedFile(image.path);
+          // Normalize to filename: prefer stored filename, then path basename
+          const candidate = image.filename || image.path || image.url || "";
+          const filename = candidate ? path.basename(candidate) : "";
+          if (filename) {
+            // deleteUploadedFile will handle local file deletion; if ImageKit is used,
+            // it may attempt remote deletion as a best-effort (async).
+            deleteUploadedFile(filename);
           }
         } catch (err) {
           console.error(`Error deleting image ${image.filename}:`, err);

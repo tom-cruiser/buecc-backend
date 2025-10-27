@@ -134,9 +134,13 @@ export const deleteTeamMember = async (req, res) => {
     // Attempt to delete the associated image file
     if (member.image) {
       try {
-        const imagePath = `path/to/your/uploads/${member.image}`; // Adjust this path
-        if (fs.existsSync(imagePath)) {
-          deleteUploadedFile(imagePath);
+        // member.image may be a URL (/uploads/xxx), a filename, or an external URL.
+        const candidate = member.image;
+        const filename = candidate ? path.basename(candidate) : "";
+        if (filename) {
+          // deleteUploadedFile handles local deletions and will attempt remote
+          // provider deletion if configured (ImageKit) as a best-effort.
+          deleteUploadedFile(filename);
         }
       } catch (err) {
         console.warn(

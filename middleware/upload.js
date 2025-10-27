@@ -193,14 +193,31 @@ if (imagekitEnabled) {
 
 // File management utilities
 export const deleteUploadedFile = (filename) => {
-  // If ImageKit is enabled, filename is expected to be a fileId (handled elsewhere)
-  const filePath = path.join(UPLOAD_DIR, filename);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-    console.log(`🗑️ Deleted file: ${filename}`);
-    return true;
+  if (!filename) return false;
+  try {
+    const filePath = path.join(UPLOAD_DIR, filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`🗑️ Deleted local file: ${filePath}`);
+      return true;
+    }
+
+    // If the file doesn't exist locally and ImageKit is enabled, attempt remote deletion
+    if (imagekitEnabled && imagekitClient) {
+      // fire-and-forget remote deletion; don't throw to avoid breaking callers
+      imagekitClient
+        .deleteFile(filename)
+        .then((res) => console.log(`🗑️ Deleted remote ImageKit fileId: ${filename}`))
+        .catch((err) => console.warn(`⚠️ ImageKit delete failed for ${filename}:`, err.message || err));
+      return true;
+    }
+
+    // Not found locally and no remote delete attempted
+    return false;
+  } catch (err) {
+    console.error(`Error deleting file ${filename}:`, err);
+    return false;
   }
-  return false;
 };
 
 export const getFileUrl = (filename) => {
